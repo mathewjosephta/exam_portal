@@ -22,7 +22,11 @@ A PHP and MySQL online examination portal with static HTML pages, a JavaScript c
 
    Sign out and sign back in to open the administrator dashboard.
 
-The example database settings are for local development only. Configure production credentials outside source control, serve the site over HTTPS, and use a dedicated MySQL account with access only to this database.
+The example database settings are for local development only. Configure production credentials outside source control, serve the site over HTTPS, and use a dedicated MySQL account with access only to this database. For production, set `APP_ENV=production`; this makes the session cookie HTTPS-only, so TLS must be enabled at the web server or trusted reverse proxy.
+
+### Updating an existing installation
+
+The full SQL file is intended for a new database. For an existing installation, take a verified backup first, then apply the migration files in `database/migrations/` in order. The current API requires `database/migrations/20261029_auth_rate_limits.sql` to be applied before deploying the updated login endpoint; otherwise the login rate limiter cannot run. Test migrations against a staging copy before production.
 
 ## HTML and PHP separation
 
