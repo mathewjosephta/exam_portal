@@ -26,7 +26,7 @@ The example database settings are for local development only. Configure producti
 
 ### Updating an existing installation
 
-The full SQL file is intended for a new database. For an existing installation, take a verified backup first, then apply the migration files in `database/migrations/` in order. The current API requires `database/migrations/20261029_auth_rate_limits.sql` to be applied before deploying the updated login endpoint; otherwise the login rate limiter cannot run. Test migrations against a staging copy before production.
+The full SQL file is intended for a new database. For an existing installation, take a verified backup first, then apply the migration files in `database/migrations/` in order. Apply `database/migrations/20261029_auth_rate_limits.sql` and then `database/migrations/20261029_exam_answer_integrity.sql` before deploying the updated API. The second migration adds composite foreign keys; inspect its diagnostic query first and resolve any legacy mismatched answers before applying it. Test migrations against a staging copy before production.
 
 ## HTML and PHP separation
 
