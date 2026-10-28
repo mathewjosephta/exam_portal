@@ -73,3 +73,10 @@ CREATE TABLE IF NOT EXISTS answers (
     CONSTRAINT fk_answers_question FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE,
     CONSTRAINT fk_answers_option FOREIGN KEY (selected_option_id) REFERENCES question_options(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS auth_rate_limits (
+    key_hash CHAR(64) NOT NULL PRIMARY KEY,
+    window_started_at DATETIME NOT NULL,
+    attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    INDEX idx_auth_rate_limits_window (window_started_at)
+) ENGINE=InnoDB;
