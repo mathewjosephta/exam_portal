@@ -1,7 +1,13 @@
 <?php
 declare(strict_types=1);
 
-$isHttps = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+$appEnvironment = strtolower((string) (getenv('APP_ENV') ?: 'development'));
+$isHttps = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== '' && $_SERVER['HTTPS'] !== 'off')
+    || $appEnvironment === 'production';
+
+// Production deployments must use HTTPS. Do not infer HTTPS from untrusted proxy headers.
+ini_set('session.use_strict_mode', '1');
+ini_set('session.use_only_cookies', '1');
 session_set_cookie_params([
     'httponly' => true,
     'path' => '/',
