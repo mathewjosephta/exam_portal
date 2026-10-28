@@ -4,6 +4,17 @@ declare(strict_types=1);
 require __DIR__ . '/../config/bootstrap.php';
 require __DIR__ . '/../config/exams.php';
 
+set_exception_handler(static function (Throwable $exception): void {
+    error_log((string) $exception);
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store');
+    }
+    echo json_encode(['error' => 'An unexpected server error occurred.'], JSON_THROW_ON_ERROR);
+    exit;
+});
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
@@ -54,6 +65,36 @@ function api_int(mixed $value): int
 {
     $number = filter_var($value, FILTER_VALIDATE_INT);
     return $number === false ? 0 : (int) $number;
+}
+
+function auth_rate_limit_key(string $email): string
+{
+    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+    return hash('sha256', 'account:' . strtolower(trim($email)) . "\\0" . $ip);
+}
+
+function auth_rate_limit_ip_key(): string
+{
+    return hash('sha256', 'ip:' . (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+}
+
+function auth_rate_limit(PDO $pdo, string $key): int
+{
+    // Opportunistically purge expired buckets so this table remains bounded over time.
+    if (random_int(1, 100) === 1) {
+        $pdo->exec('DELETE FROM auth_rate_limits WHERE window_started_at < UTC_TIMESTAMP() - INTERVAL 1 DAY');
+    }
+    $upsert = $pdo->prepare(
+        'INSERT INTO auth_rate_limits (key_hash, window_started_at, attempts)
+         VALUES (:key_hash, UTC_TIMESTAMP(), 1)
+         ON DUPLICATE KEY UPDATE
+           attempts = IF(window_started_at < UTC_TIMESTAMP() - INTERVAL 15 MINUTE, 1, attempts + 1),
+           window_started_at = IF(window_started_at < UTC_TIMESTAMP() - INTERVAL 15 MINUTE, UTC_TIMESTAMP(), window_started_at)'
+    );
+    $upsert->execute(['key_hash' => $key]);
+    $query = $pdo->prepare('SELECT attempts FROM auth_rate_limits WHERE key_hash = :key_hash');
+    $query->execute(['key_hash' => $key]);
+    return (int) $query->fetchColumn();
 }
 
 function api_user(): ?array
@@ -115,13 +156,24 @@ switch ($action) {
         $input = api_input();
         $email = strtolower(trim(is_string($input['email'] ?? null) ? $input['email'] : ''));
         $password = is_string($input['password'] ?? null) ? $input['password'] : '';
+        $rateLimitKey = auth_rate_limit_key($email);
+        $ipRateLimitKey = auth_rate_limit_ip_key();
+        $accountAttempts = auth_rate_limit($pdo, $rateLimitKey);
+        $ipAttempts = auth_rate_limit($pdo, $ipRateLimitKey);
+        if ($accountAttempts > 10 || $ipAttempts > 300) {
+            header('Retry-After: 900');
+            api_response(['error' => 'Too many sign-in attempts. Please wait 15 minutes before trying again.'], 429);
+        }
         $query = $pdo->prepare('SELECT id, name, email, password_hash, role FROM users WHERE email = :email');
         $query->execute(['email' => $email]);
         $user = $query->fetch();
         if (!$user || !password_verify($password, $user['password_hash'])) {
             api_response(['error' => 'The email address or password is incorrect.'], 422);
         }
+        $clearRateLimit = $pdo->prepare('DELETE FROM auth_rate_limits WHERE key_hash = :account_key');
+        $clearRateLimit->execute(['account_key' => $rateLimitKey]);
         session_regenerate_id(true);
+        unset($_SESSION['csrf_token']);
         $_SESSION['user_id'] = (int) $user['id'];
         $_SESSION['user_name'] = $user['name'];
         $_SESSION['role'] = $user['role'];
@@ -168,6 +220,7 @@ switch ($action) {
             throw $exception;
         }
         session_regenerate_id(true);
+        unset($_SESSION['csrf_token']);
         $_SESSION['user_id'] = (int) $pdo->lastInsertId();
         $_SESSION['user_name'] = $name;
         $_SESSION['role'] = 'student';
@@ -221,26 +274,39 @@ switch ($action) {
         if (!$examId) {
             api_response(['error' => 'Invalid exam.'], 400);
         }
-        $exam = api_exam($examId);
-        $existing = $pdo->prepare('SELECT id, status FROM attempts WHERE exam_id = :exam_id AND student_id = :student_id');
-        $existing->execute(['exam_id' => $examId, 'student_id' => $studentId]);
-        $attempt = $existing->fetch();
-        if (!$attempt && (!exam_is_open($exam) || (int) $exam['question_count'] < 1)) {
-            api_response(['error' => 'This exam is not currently available.'], 409);
+        $pdo->beginTransaction();
+        try {
+            // Start and publish/unpublish operations lock the same exam row.
+            $examQuery = $pdo->prepare('SELECT * FROM exams WHERE id = :id FOR UPDATE');
+            $examQuery->execute(['id' => $examId]);
+            $exam = $examQuery->fetch();
+            if (!$exam) {
+                $pdo->rollBack();
+                api_response(['error' => 'Exam not found.'], 404);
+            }
+            $existing = $pdo->prepare('SELECT id, status FROM attempts WHERE exam_id = :exam_id AND student_id = :student_id');
+            $existing->execute(['exam_id' => $examId, 'student_id' => $studentId]);
+            $attempt = $existing->fetch();
+            if (!$attempt) {
+                $count = $pdo->prepare('SELECT COUNT(*) FROM questions WHERE exam_id = :exam_id');
+                $count->execute(['exam_id' => $examId]);
+                $exam['question_count'] = (int) $count->fetchColumn();
+                if (!exam_is_open($exam) || (int) $exam['question_count'] < 1) {
+                    $pdo->rollBack();
+                    api_response(['error' => 'This exam is not currently available.'], 409);
+                }
+                $create = $pdo->prepare('INSERT INTO attempts (exam_id, student_id) VALUES (:exam_id, :student_id)');
+                $create->execute(['exam_id' => $examId, 'student_id' => $studentId]);
+                $attempt = ['id' => (int) $pdo->lastInsertId(), 'status' => 'in_progress'];
+            }
+            $pdo->commit();
+            api_response(['attempt_id' => (int) $attempt['id'], 'status' => $attempt['status']]);
+        } catch (Throwable $exception) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
         }
-        if (!$attempt) {
-            $create = $pdo->prepare(
-                'INSERT INTO attempts (exam_id, student_id)
-                 VALUES (:exam_id, :student_id)
-                 ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)'
-            );
-            $create->execute(['exam_id' => $examId, 'student_id' => $studentId]);
-            $attemptId = (int) $pdo->lastInsertId();
-            $statusQuery = $pdo->prepare('SELECT status FROM attempts WHERE id = :id');
-            $statusQuery->execute(['id' => $attemptId]);
-            $attempt = ['id' => $attemptId, 'status' => $statusQuery->fetchColumn()];
-        }
-        api_response(['attempt_id' => (int) $attempt['id'], 'status' => $attempt['status']]);
 
     case 'student/attempt':
         api_require_method('GET');
@@ -303,7 +369,7 @@ switch ($action) {
         $pdo->beginTransaction();
         try {
             $attemptQuery = $pdo->prepare(
-                "SELECT a.status, a.started_at, e.duration_minutes
+                "SELECT a.status, a.started_at, a.exam_id, e.duration_minutes
                  FROM attempts a JOIN exams e ON e.id = a.exam_id
                  WHERE a.id = :id AND a.student_id = :student_id FOR UPDATE"
             );
@@ -330,11 +396,16 @@ switch ($action) {
                 api_response(['error' => 'That answer is not part of this exam question.'], 400);
             }
             $save = $pdo->prepare(
-                'INSERT INTO answers (attempt_id, question_id, selected_option_id)
-                 VALUES (:attempt_id, :question_id, :option_id)
+                'INSERT INTO answers (exam_id, attempt_id, question_id, selected_option_id)
+                 VALUES (:exam_id, :attempt_id, :question_id, :option_id)
                  ON DUPLICATE KEY UPDATE selected_option_id = VALUES(selected_option_id)'
             );
-            $save->execute(['attempt_id' => $attemptId, 'question_id' => $questionId, 'option_id' => $optionId]);
+            $save->execute([
+                'exam_id' => (int) $attempt['exam_id'],
+                'attempt_id' => $attemptId,
+                'question_id' => $questionId,
+                'option_id' => $optionId,
+            ]);
             $pdo->commit();
             api_response(['saved' => true]);
         } catch (Throwable $exception) {
@@ -525,11 +596,8 @@ switch ($action) {
         api_require_csrf();
         $input = api_input();
         $examId = api_int($input['exam_id'] ?? null);
-        $exam = api_exam($examId);
-        $attemptQuery = $pdo->prepare('SELECT COUNT(*) FROM attempts WHERE exam_id = :exam_id');
-        $attemptQuery->execute(['exam_id' => $examId]);
-        if ($exam['status'] !== 'draft' || (int) $attemptQuery->fetchColumn() > 0) {
-            api_response(['error' => 'Questions cannot be changed after the exam is published or has attempts.'], 409);
+        if ($examId < 1) {
+            api_response(['error' => 'Invalid exam.'], 400);
         }
         $text = trim(is_string($input['question_text'] ?? null) ? $input['question_text'] : '');
         $marks = api_int($input['marks'] ?? null);
@@ -560,6 +628,20 @@ switch ($action) {
         }
         $pdo->beginTransaction();
         try {
+            // Serialize question creation with publishing by locking the same exam row.
+            $examLock = $pdo->prepare('SELECT status FROM exams WHERE id = :exam_id FOR UPDATE');
+            $examLock->execute(['exam_id' => $examId]);
+            $lockedExam = $examLock->fetch();
+            if (!$lockedExam) {
+                $pdo->rollBack();
+                api_response(['error' => 'Exam not found.'], 404);
+            }
+            $attemptQuery = $pdo->prepare('SELECT COUNT(*) FROM attempts WHERE exam_id = :exam_id');
+            $attemptQuery->execute(['exam_id' => $examId]);
+            if ($lockedExam['status'] !== 'draft' || (int) $attemptQuery->fetchColumn() > 0) {
+                $pdo->rollBack();
+                api_response(['error' => 'Questions cannot be changed after the exam is published or has attempts.'], 409);
+            }
             $positionQuery = $pdo->prepare('SELECT COALESCE(MAX(position), 0) + 1 FROM questions WHERE exam_id = :exam_id');
             $positionQuery->execute(['exam_id' => $examId]);
             $insertQuestion = $pdo->prepare(
@@ -595,29 +677,60 @@ switch ($action) {
         api_require_role('admin');
         api_require_csrf();
         $examId = api_int(api_input()['exam_id'] ?? null);
-        $exam = api_exam($examId);
-        if ($exam['status'] === 'draft') {
-            $check = $pdo->prepare(
-                'SELECT COUNT(*) FROM questions q
-                 JOIN question_options o ON o.question_id = q.id AND o.is_correct = 1
-                 WHERE q.exam_id = :exam_id'
-            );
-            $check->execute(['exam_id' => $examId]);
-            if ((int) $check->fetchColumn() < 1) {
-                api_response(['error' => 'Add at least one question with a correct answer before publishing.'], 409);
+        if ($examId < 1) {
+            api_response(['error' => 'Invalid exam.'], 400);
+        }
+        $pdo->beginTransaction();
+        try {
+            // Question creation and publishing both lock this row, preventing a publish/create race.
+            $examLock = $pdo->prepare('SELECT status FROM exams WHERE id = :id FOR UPDATE');
+            $examLock->execute(['id' => $examId]);
+            $exam = $examLock->fetch();
+            if (!$exam) {
+                $pdo->rollBack();
+                api_response(['error' => 'Exam not found.'], 404);
             }
-            $update = $pdo->prepare("UPDATE exams SET status = 'published' WHERE id = :id");
+            if ($exam['status'] === 'draft') {
+                $invalid = $pdo->prepare(
+                    'SELECT q.id
+                     FROM questions q
+                     LEFT JOIN question_options o ON o.question_id = q.id
+                     WHERE q.exam_id = :exam_id
+                     GROUP BY q.id
+                     HAVING SUM(CASE WHEN o.is_correct = 1 THEN 1 ELSE 0 END) <> 1'
+                );
+                $invalid->execute(['exam_id' => $examId]);
+                if ($invalid->fetchColumn() !== false) {
+                    $pdo->rollBack();
+                    api_response(['error' => 'Every question must have exactly one correct answer before publishing.'], 409);
+                }
+                $questionCount = $pdo->prepare('SELECT COUNT(*) FROM questions WHERE exam_id = :exam_id');
+                $questionCount->execute(['exam_id' => $examId]);
+                if ((int) $questionCount->fetchColumn() < 1) {
+                    $pdo->rollBack();
+                    api_response(['error' => 'Add at least one question before publishing.'], 409);
+                }
+                $update = $pdo->prepare("UPDATE exams SET status = 'published' WHERE id = :id");
+                $update->execute(['id' => $examId]);
+                $pdo->commit();
+                api_response(['status' => 'published']);
+            }
+            $attempts = $pdo->prepare("SELECT COUNT(*) FROM attempts WHERE exam_id = :exam_id AND status = 'in_progress'");
+            $attempts->execute(['exam_id' => $examId]);
+            if ((int) $attempts->fetchColumn() > 0) {
+                $pdo->rollBack();
+                api_response(['error' => 'This exam cannot be unpublished while students have attempts in progress.'], 409);
+            }
+            $update = $pdo->prepare("UPDATE exams SET status = 'draft' WHERE id = :id");
             $update->execute(['id' => $examId]);
-            api_response(['status' => 'published']);
+            $pdo->commit();
+            api_response(['status' => 'draft']);
+        } catch (Throwable $exception) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
         }
-        $attempts = $pdo->prepare("SELECT COUNT(*) FROM attempts WHERE exam_id = :exam_id AND status = 'in_progress'");
-        $attempts->execute(['exam_id' => $examId]);
-        if ((int) $attempts->fetchColumn() > 0) {
-            api_response(['error' => 'This exam cannot be unpublished while students have attempts in progress.'], 409);
-        }
-        $update = $pdo->prepare("UPDATE exams SET status = 'draft' WHERE id = :id");
-        $update->execute(['id' => $examId]);
-        api_response(['status' => 'draft']);
 
     case 'admin/results':
         api_require_method('GET');
