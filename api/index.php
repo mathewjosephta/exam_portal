@@ -70,7 +70,12 @@ function api_int(mixed $value): int
 function auth_rate_limit_key(string $email): string
 {
     $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
-    return hash('sha256', strtolower(trim($email)) . "\\0" . $ip);
+    return hash('sha256', 'account:' . strtolower(trim($email)) . "\\0" . $ip);
+}
+
+function auth_rate_limit_ip_key(): string
+{
+    return hash('sha256', 'ip:' . (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
 }
 
 function auth_rate_limit(PDO $pdo, string $key): int
@@ -148,7 +153,10 @@ switch ($action) {
         $email = strtolower(trim(is_string($input['email'] ?? null) ? $input['email'] : ''));
         $password = is_string($input['password'] ?? null) ? $input['password'] : '';
         $rateLimitKey = auth_rate_limit_key($email);
-        if (auth_rate_limit($pdo, $rateLimitKey) > 10) {
+        $ipRateLimitKey = auth_rate_limit_ip_key();
+        $accountAttempts = auth_rate_limit($pdo, $rateLimitKey);
+        $ipAttempts = auth_rate_limit($pdo, $ipRateLimitKey);
+        if ($accountAttempts > 10 || $ipAttempts > 50) {
             header('Retry-After: 900');
             api_response(['error' => 'Too many sign-in attempts. Please wait 15 minutes before trying again.'], 429);
         }
@@ -158,8 +166,8 @@ switch ($action) {
         if (!$user || !password_verify($password, $user['password_hash'])) {
             api_response(['error' => 'The email address or password is incorrect.'], 422);
         }
-        $clearRateLimit = $pdo->prepare('DELETE FROM auth_rate_limits WHERE key_hash = :key_hash');
-        $clearRateLimit->execute(['key_hash' => $rateLimitKey]);
+        $clearRateLimit = $pdo->prepare('DELETE FROM auth_rate_limits WHERE key_hash IN (:account_key, :ip_key)');
+        $clearRateLimit->execute(['account_key' => $rateLimitKey, 'ip_key' => $ipRateLimitKey]);
         session_regenerate_id(true);
         unset($_SESSION['csrf_token']);
         $_SESSION['user_id'] = (int) $user['id'];
