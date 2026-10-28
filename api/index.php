@@ -525,11 +525,8 @@ switch ($action) {
         api_require_csrf();
         $input = api_input();
         $examId = api_int($input['exam_id'] ?? null);
-        $exam = api_exam($examId);
-        $attemptQuery = $pdo->prepare('SELECT COUNT(*) FROM attempts WHERE exam_id = :exam_id');
-        $attemptQuery->execute(['exam_id' => $examId]);
-        if ($exam['status'] !== 'draft' || (int) $attemptQuery->fetchColumn() > 0) {
-            api_response(['error' => 'Questions cannot be changed after the exam is published or has attempts.'], 409);
+        if ($examId < 1) {
+            api_response(['error' => 'Invalid exam.'], 400);
         }
         $text = trim(is_string($input['question_text'] ?? null) ? $input['question_text'] : '');
         $marks = api_int($input['marks'] ?? null);
@@ -560,6 +557,20 @@ switch ($action) {
         }
         $pdo->beginTransaction();
         try {
+            // Serialize question creation with publishing by locking the same exam row.
+            $examLock = $pdo->prepare('SELECT status FROM exams WHERE id = :exam_id FOR UPDATE');
+            $examLock->execute(['exam_id' => $examId]);
+            $lockedExam = $examLock->fetch();
+            if (!$lockedExam) {
+                $pdo->rollBack();
+                api_response(['error' => 'Exam not found.'], 404);
+            }
+            $attemptQuery = $pdo->prepare('SELECT COUNT(*) FROM attempts WHERE exam_id = :exam_id');
+            $attemptQuery->execute(['exam_id' => $examId]);
+            if ($lockedExam['status'] !== 'draft' || (int) $attemptQuery->fetchColumn() > 0) {
+                $pdo->rollBack();
+                api_response(['error' => 'Questions cannot be changed after the exam is published or has attempts.'], 409);
+            }
             $positionQuery = $pdo->prepare('SELECT COALESCE(MAX(position), 0) + 1 FROM questions WHERE exam_id = :exam_id');
             $positionQuery->execute(['exam_id' => $examId]);
             $insertQuestion = $pdo->prepare(
@@ -595,29 +606,60 @@ switch ($action) {
         api_require_role('admin');
         api_require_csrf();
         $examId = api_int(api_input()['exam_id'] ?? null);
-        $exam = api_exam($examId);
-        if ($exam['status'] === 'draft') {
-            $check = $pdo->prepare(
-                'SELECT COUNT(*) FROM questions q
-                 JOIN question_options o ON o.question_id = q.id AND o.is_correct = 1
-                 WHERE q.exam_id = :exam_id'
-            );
-            $check->execute(['exam_id' => $examId]);
-            if ((int) $check->fetchColumn() < 1) {
-                api_response(['error' => 'Add at least one question with a correct answer before publishing.'], 409);
+        if ($examId < 1) {
+            api_response(['error' => 'Invalid exam.'], 400);
+        }
+        $pdo->beginTransaction();
+        try {
+            // Question creation and publishing both lock this row, preventing a publish/create race.
+            $examLock = $pdo->prepare('SELECT status FROM exams WHERE id = :id FOR UPDATE');
+            $examLock->execute(['id' => $examId]);
+            $exam = $examLock->fetch();
+            if (!$exam) {
+                $pdo->rollBack();
+                api_response(['error' => 'Exam not found.'], 404);
             }
-            $update = $pdo->prepare("UPDATE exams SET status = 'published' WHERE id = :id");
+            if ($exam['status'] === 'draft') {
+                $invalid = $pdo->prepare(
+                    'SELECT q.id
+                     FROM questions q
+                     LEFT JOIN question_options o ON o.question_id = q.id
+                     WHERE q.exam_id = :exam_id
+                     GROUP BY q.id
+                     HAVING SUM(CASE WHEN o.is_correct = 1 THEN 1 ELSE 0 END) <> 1'
+                );
+                $invalid->execute(['exam_id' => $examId]);
+                if ($invalid->fetchColumn() !== false) {
+                    $pdo->rollBack();
+                    api_response(['error' => 'Every question must have exactly one correct answer before publishing.'], 409);
+                }
+                $questionCount = $pdo->prepare('SELECT COUNT(*) FROM questions WHERE exam_id = :exam_id');
+                $questionCount->execute(['exam_id' => $examId]);
+                if ((int) $questionCount->fetchColumn() < 1) {
+                    $pdo->rollBack();
+                    api_response(['error' => 'Add at least one question before publishing.'], 409);
+                }
+                $update = $pdo->prepare("UPDATE exams SET status = 'published' WHERE id = :id");
+                $update->execute(['id' => $examId]);
+                $pdo->commit();
+                api_response(['status' => 'published']);
+            }
+            $attempts = $pdo->prepare("SELECT COUNT(*) FROM attempts WHERE exam_id = :exam_id AND status = 'in_progress'");
+            $attempts->execute(['exam_id' => $examId]);
+            if ((int) $attempts->fetchColumn() > 0) {
+                $pdo->rollBack();
+                api_response(['error' => 'This exam cannot be unpublished while students have attempts in progress.'], 409);
+            }
+            $update = $pdo->prepare("UPDATE exams SET status = 'draft' WHERE id = :id");
             $update->execute(['id' => $examId]);
-            api_response(['status' => 'published']);
+            $pdo->commit();
+            api_response(['status' => 'draft']);
+        } catch (Throwable $exception) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
         }
-        $attempts = $pdo->prepare("SELECT COUNT(*) FROM attempts WHERE exam_id = :exam_id AND status = 'in_progress'");
-        $attempts->execute(['exam_id' => $examId]);
-        if ((int) $attempts->fetchColumn() > 0) {
-            api_response(['error' => 'This exam cannot be unpublished while students have attempts in progress.'], 409);
-        }
-        $update = $pdo->prepare("UPDATE exams SET status = 'draft' WHERE id = :id");
-        $update->execute(['id' => $examId]);
-        api_response(['status' => 'draft']);
 
     case 'admin/results':
         api_require_method('GET');
