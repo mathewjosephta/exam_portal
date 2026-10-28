@@ -262,26 +262,39 @@ switch ($action) {
         if (!$examId) {
             api_response(['error' => 'Invalid exam.'], 400);
         }
-        $exam = api_exam($examId);
-        $existing = $pdo->prepare('SELECT id, status FROM attempts WHERE exam_id = :exam_id AND student_id = :student_id');
-        $existing->execute(['exam_id' => $examId, 'student_id' => $studentId]);
-        $attempt = $existing->fetch();
-        if (!$attempt && (!exam_is_open($exam) || (int) $exam['question_count'] < 1)) {
-            api_response(['error' => 'This exam is not currently available.'], 409);
+        $pdo->beginTransaction();
+        try {
+            // Start and publish/unpublish operations lock the same exam row.
+            $examQuery = $pdo->prepare('SELECT * FROM exams WHERE id = :id FOR UPDATE');
+            $examQuery->execute(['id' => $examId]);
+            $exam = $examQuery->fetch();
+            if (!$exam) {
+                $pdo->rollBack();
+                api_response(['error' => 'Exam not found.'], 404);
+            }
+            $existing = $pdo->prepare('SELECT id, status FROM attempts WHERE exam_id = :exam_id AND student_id = :student_id');
+            $existing->execute(['exam_id' => $examId, 'student_id' => $studentId]);
+            $attempt = $existing->fetch();
+            if (!$attempt) {
+                $count = $pdo->prepare('SELECT COUNT(*) FROM questions WHERE exam_id = :exam_id');
+                $count->execute(['exam_id' => $examId]);
+                $exam['question_count'] = (int) $count->fetchColumn();
+                if (!exam_is_open($exam) || (int) $exam['question_count'] < 1) {
+                    $pdo->rollBack();
+                    api_response(['error' => 'This exam is not currently available.'], 409);
+                }
+                $create = $pdo->prepare('INSERT INTO attempts (exam_id, student_id) VALUES (:exam_id, :student_id)');
+                $create->execute(['exam_id' => $examId, 'student_id' => $studentId]);
+                $attempt = ['id' => (int) $pdo->lastInsertId(), 'status' => 'in_progress'];
+            }
+            $pdo->commit();
+            api_response(['attempt_id' => (int) $attempt['id'], 'status' => $attempt['status']]);
+        } catch (Throwable $exception) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
         }
-        if (!$attempt) {
-            $create = $pdo->prepare(
-                'INSERT INTO attempts (exam_id, student_id)
-                 VALUES (:exam_id, :student_id)
-                 ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)'
-            );
-            $create->execute(['exam_id' => $examId, 'student_id' => $studentId]);
-            $attemptId = (int) $pdo->lastInsertId();
-            $statusQuery = $pdo->prepare('SELECT status FROM attempts WHERE id = :id');
-            $statusQuery->execute(['id' => $attemptId]);
-            $attempt = ['id' => $attemptId, 'status' => $statusQuery->fetchColumn()];
-        }
-        api_response(['attempt_id' => (int) $attempt['id'], 'status' => $attempt['status']]);
 
     case 'student/attempt':
         api_require_method('GET');
