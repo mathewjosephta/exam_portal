@@ -67,6 +67,27 @@ function api_int(mixed $value): int
     return $number === false ? 0 : (int) $number;
 }
 
+function auth_rate_limit_key(string $email): string
+{
+    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+    return hash('sha256', strtolower(trim($email)) . "\\0" . $ip);
+}
+
+function auth_rate_limit(PDO $pdo, string $key): int
+{
+    $upsert = $pdo->prepare(
+        'INSERT INTO auth_rate_limits (key_hash, window_started_at, attempts)
+         VALUES (:key_hash, UTC_TIMESTAMP(), 1)
+         ON DUPLICATE KEY UPDATE
+           attempts = IF(window_started_at < UTC_TIMESTAMP() - INTERVAL 15 MINUTE, 1, attempts + 1),
+           window_started_at = IF(window_started_at < UTC_TIMESTAMP() - INTERVAL 15 MINUTE, UTC_TIMESTAMP(), window_started_at)'
+    );
+    $upsert->execute(['key_hash' => $key]);
+    $query = $pdo->prepare('SELECT attempts FROM auth_rate_limits WHERE key_hash = :key_hash');
+    $query->execute(['key_hash' => $key]);
+    return (int) $query->fetchColumn();
+}
+
 function api_user(): ?array
 {
     if (!isset($_SESSION['user_id'], $_SESSION['role'])) {
@@ -126,12 +147,19 @@ switch ($action) {
         $input = api_input();
         $email = strtolower(trim(is_string($input['email'] ?? null) ? $input['email'] : ''));
         $password = is_string($input['password'] ?? null) ? $input['password'] : '';
+        $rateLimitKey = auth_rate_limit_key($email);
+        if (auth_rate_limit($pdo, $rateLimitKey) > 10) {
+            header('Retry-After: 900');
+            api_response(['error' => 'Too many sign-in attempts. Please wait 15 minutes before trying again.'], 429);
+        }
         $query = $pdo->prepare('SELECT id, name, email, password_hash, role FROM users WHERE email = :email');
         $query->execute(['email' => $email]);
         $user = $query->fetch();
         if (!$user || !password_verify($password, $user['password_hash'])) {
             api_response(['error' => 'The email address or password is incorrect.'], 422);
         }
+        $clearRateLimit = $pdo->prepare('DELETE FROM auth_rate_limits WHERE key_hash = :key_hash');
+        $clearRateLimit->execute(['key_hash' => $rateLimitKey]);
         session_regenerate_id(true);
         unset($_SESSION['csrf_token']);
         $_SESSION['user_id'] = (int) $user['id'];
