@@ -166,8 +166,8 @@ switch ($action) {
         if (!$user || !password_verify($password, $user['password_hash'])) {
             api_response(['error' => 'The email address or password is incorrect.'], 422);
         }
-        $clearRateLimit = $pdo->prepare('DELETE FROM auth_rate_limits WHERE key_hash IN (:account_key, :ip_key)');
-        $clearRateLimit->execute(['account_key' => $rateLimitKey, 'ip_key' => $ipRateLimitKey]);
+        $clearRateLimit = $pdo->prepare('DELETE FROM auth_rate_limits WHERE key_hash = :account_key');
+        $clearRateLimit->execute(['account_key' => $rateLimitKey]);
         session_regenerate_id(true);
         unset($_SESSION['csrf_token']);
         $_SESSION['user_id'] = (int) $user['id'];
