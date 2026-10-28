@@ -80,6 +80,10 @@ function auth_rate_limit_ip_key(): string
 
 function auth_rate_limit(PDO $pdo, string $key): int
 {
+    // Opportunistically purge expired buckets so this table remains bounded over time.
+    if (random_int(1, 100) === 1) {
+        $pdo->exec('DELETE FROM auth_rate_limits WHERE window_started_at < UTC_TIMESTAMP() - INTERVAL 1 DAY');
+    }
     $upsert = $pdo->prepare(
         'INSERT INTO auth_rate_limits (key_hash, window_started_at, attempts)
          VALUES (:key_hash, UTC_TIMESTAMP(), 1)
