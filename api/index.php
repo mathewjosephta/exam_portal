@@ -4,6 +4,17 @@ declare(strict_types=1);
 require __DIR__ . '/../config/bootstrap.php';
 require __DIR__ . '/../config/exams.php';
 
+set_exception_handler(static function (Throwable $exception): void {
+    error_log((string) $exception);
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store');
+    }
+    echo json_encode(['error' => 'An unexpected server error occurred.'], JSON_THROW_ON_ERROR);
+    exit;
+});
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
@@ -122,6 +133,7 @@ switch ($action) {
             api_response(['error' => 'The email address or password is incorrect.'], 422);
         }
         session_regenerate_id(true);
+        unset($_SESSION['csrf_token']);
         $_SESSION['user_id'] = (int) $user['id'];
         $_SESSION['user_name'] = $user['name'];
         $_SESSION['role'] = $user['role'];
@@ -168,6 +180,7 @@ switch ($action) {
             throw $exception;
         }
         session_regenerate_id(true);
+        unset($_SESSION['csrf_token']);
         $_SESSION['user_id'] = (int) $pdo->lastInsertId();
         $_SESSION['user_name'] = $name;
         $_SESSION['role'] = 'student';
