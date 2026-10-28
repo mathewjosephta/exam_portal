@@ -434,6 +434,9 @@
                 return;
             }
             try {
+                if (expired && failed.size) {
+                    window.alert('Time expired. One or more answers could not be saved, so only answers already saved by the server will be scored.');
+                }
                 await api('student/submit', 'POST', { attempt_id: attemptId });
                 location.assign(routeUrl(`/student/result?id=${attemptId}`));
             } catch (error) {
