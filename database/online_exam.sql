@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS questions (
     position SMALLINT UNSIGNED NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_questions_exam FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_questions_exam_id_id (exam_id, id),
     INDEX idx_questions_exam_position (exam_id, position)
 ) ENGINE=InnoDB;
 
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS question_options (
     is_correct TINYINT(1) NOT NULL DEFAULT 0,
     position TINYINT UNSIGNED NOT NULL DEFAULT 1,
     CONSTRAINT fk_options_question FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_options_question_id_id (question_id, id),
     INDEX idx_options_question (question_id, position)
 ) ENGINE=InnoDB;
 
@@ -59,19 +61,24 @@ CREATE TABLE IF NOT EXISTS attempts (
     CONSTRAINT fk_attempts_exam FOREIGN KEY (exam_id) REFERENCES exams(id),
     CONSTRAINT fk_attempts_student FOREIGN KEY (student_id) REFERENCES users(id),
     CONSTRAINT uq_attempt_exam_student UNIQUE (exam_id, student_id),
+    UNIQUE KEY uq_attempts_exam_id_id (exam_id, id),
     INDEX idx_attempts_student_status (student_id, status),
     INDEX idx_attempts_exam_status (exam_id, status)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS answers (
+    exam_id BIGINT UNSIGNED NOT NULL,
     attempt_id BIGINT UNSIGNED NOT NULL,
     question_id BIGINT UNSIGNED NOT NULL,
     selected_option_id BIGINT UNSIGNED NULL,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (attempt_id, question_id),
-    CONSTRAINT fk_answers_attempt FOREIGN KEY (attempt_id) REFERENCES attempts(id) ON DELETE CASCADE,
-    CONSTRAINT fk_answers_question FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE,
-    CONSTRAINT fk_answers_option FOREIGN KEY (selected_option_id) REFERENCES question_options(id) ON DELETE SET NULL
+    CONSTRAINT fk_answers_attempt_exam FOREIGN KEY (exam_id, attempt_id)
+        REFERENCES attempts(exam_id, id) ON DELETE CASCADE,
+    CONSTRAINT fk_answers_question_exam FOREIGN KEY (exam_id, question_id)
+        REFERENCES questions(exam_id, id) ON DELETE CASCADE,
+    CONSTRAINT fk_answers_question_option FOREIGN KEY (question_id, selected_option_id)
+        REFERENCES question_options(question_id, id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS auth_rate_limits (
