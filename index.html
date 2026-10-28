@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="A simple and secure online examination portal for students and administrators.">
+    <title>ExamPortal | Online Examination System</title>
+    <link rel="stylesheet" href="assets/css/style.css">
+    <style>
+        .hero { padding: 90px 0; background: linear-gradient(120deg, #eff6ff, #fff 70%); }
+        .hero h1 { max-width: 720px; margin: 20px 0; font-size: clamp(40px, 7vw, 68px); }
+        .hero h1 span { color: var(--primary); }
+        .hero p { max-width: 650px; color: var(--muted); font-size: 18px; }
+        .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+        .badge { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 12px; font-weight: 800; letter-spacing: .8px; }
+        .landing-section { padding: 56px 0; }
+        .landing-section h2 { font-size: 30px; }
+        .feature-grid, .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-top: 24px; }
+        .feature-card, .step { padding: 22px; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
+        .feature-card p, .step p { margin-bottom: 0; color: var(--muted); }
+        .cta { padding: 52px 24px; border-radius: 14px; background: #eff6ff; text-align: center; }
+        .cta p { color: var(--muted); }
+        .site-footer { margin-top: 56px; }
+        @media (max-width: 700px) { .hero { padding: 58px 0; } }
+    </style>
+</head>
+<body>
+    <header class="site-header">
+        <div class="container nav">
+            <a class="brand" href="index.html">Exam<span>Portal</span></a>
+            <nav class="nav-actions" aria-label="Main navigation">
+                <a href="#features">Features</a>
+                <a href="#how-it-works">How it works</a>
+                <a href="login.html">Sign in</a>
+                <a class="button button-small" href="register.html">Get started</a>
+            </nav>
+        </div>
+    </header>
+    <main>
+        <section class="hero">
+            <div class="container">
+                <span class="badge">ONLINE EXAMINATION SYSTEM</span>
+                <h1>A smarter way to <span>take exams.</span></h1>
+                <p>Take online examinations in a simple, organized environment. Access available exams, answer questions, and review your results from one convenient platform.</p>
+                <div class="hero-actions">
+                    <a class="button" href="register.html">Create student account</a>
+                    <a class="button button-outline" href="login.html">Sign in</a>
+                </div>
+            </div>
+        </section>
+        <section class="landing-section container" id="features">
+            <h2>Everything you need for online exams</h2>
+            <p class="muted">Essential tools for students and examination administrators.</p>
+            <div class="feature-grid">
+                <article class="feature-card"><h3>Easy exam access</h3><p>View available examinations, read instructions, and begin an exam when you are ready.</p></article>
+                <article class="feature-card"><h3>Timed examinations</h3><p>Complete exams within their allotted time with a clear countdown and structured questions.</p></article>
+                <article class="feature-card"><h3>Results and review</h3><p>Review submitted examinations and see scores from your student account.</p></article>
+            </div>
+        </section>
+        <section class="landing-section container" id="how-it-works">
+            <h2>How it works</h2>
+            <div class="steps">
+                <article class="step"><h3>1. Create an account</h3><p>Register as a student to access the examination portal.</p></article>
+                <article class="step"><h3>2. Take your exam</h3><p>Choose an available examination and submit your answers.</p></article>
+                <article class="step"><h3>3. View your results</h3><p>Access scores and submitted examination results.</p></article>
+            </div>
+        </section>
+        <section class="container cta">
+            <h2>Ready to get started?</h2>
+            <p>Create your student account and access the examination portal.</p>
+            <a class="button" href="register.html">Register now</a>
+        </section>
+    </main>
+    <footer class="site-footer"><div class="container">ExamPortal · Online Examination System</div></footer>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # ExamPortal
 
-A PHP and MySQL online examination portal with student registration, an administrator dashboard, timed multiple-choice exams, autosaved answers, automatic scoring, and answer review.
+A PHP and MySQL online examination portal with static HTML pages, a JavaScript client, and a PHP JSON API. It supports student registration, an administrator dashboard, timed multiple-choice exams, autosaved answers, automatic scoring, and answer review.
 
 ## Requirements
 
@@ -12,7 +12,7 @@ A PHP and MySQL online examination portal with student registration, an administ
 
 1. Create the database and tables by importing `database/online_exam.sql` into MySQL.
 2. Copy `config/database.example.php` to `config/database.php` and update the host, database name, username, and password, or set the `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` environment variables. `config/database.php` is intentionally excluded from version control. `.env.example` documents the variables; PHP does not load `.env` files automatically.
-3. Point your PHP web server at this directory. For a local PHP development server, run `php -S 127.0.0.1:8000` from the project root and open `http://127.0.0.1:8000`.
+3. Point your PHP web server at this directory. For a local PHP development server, run `php -S 127.0.0.1:8000` from the project root and open `http://127.0.0.1:8000`. The landing page and every student, admin, login, and exam screen are separate HTML files. PHP handles the application data and actions through `api/index.php`.
 4. Register a student account from the portal.
 5. Promote the first administrator from a trusted MySQL session:
 
@@ -23,6 +23,15 @@ A PHP and MySQL online examination portal with student registration, an administ
    Sign out and sign back in to open the administrator dashboard.
 
 The example database settings are for local development only. Configure production credentials outside source control, serve the site over HTTPS, and use a dedicated MySQL account with access only to this database.
+
+## HTML and PHP separation
+
+- `index.html`, `login.html`, `register.html`, `student/*.html`, and `admin/*.html` are the browser pages.
+- `assets/js/app.js` loads data and handles interactions using the JSON API.
+- `api/index.php?action=...` handles authentication, role checks, exam operations, and JSON responses.
+- `config/` contains the shared PHP bootstrap and database connection.
+
+The API uses the existing PHP session and a CSRF token. Keep the HTML, JavaScript, and PHP API on the same origin so the browser can send the session cookie. The old `.php` page URLs redirect to their `.html` equivalents for compatibility.
 
 ## Using the portal
 
