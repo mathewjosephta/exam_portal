@@ -156,7 +156,7 @@ switch ($action) {
         $ipRateLimitKey = auth_rate_limit_ip_key();
         $accountAttempts = auth_rate_limit($pdo, $rateLimitKey);
         $ipAttempts = auth_rate_limit($pdo, $ipRateLimitKey);
-        if ($accountAttempts > 10 || $ipAttempts > 50) {
+        if ($accountAttempts > 10 || $ipAttempts > 300) {
             header('Retry-After: 900');
             api_response(['error' => 'Too many sign-in attempts. Please wait 15 minutes before trying again.'], 429);
         }
