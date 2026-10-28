@@ -28,10 +28,14 @@ function submit_attempt(PDO $pdo, int $attemptId, int $studentId): void
         if ($attempt['status'] === 'in_progress') {
             $scoreQuery = $pdo->prepare(
                 'SELECT COALESCE(SUM(q.marks), 0)
-                 FROM answers a
-                 JOIN question_options o ON o.id = a.selected_option_id
-                 JOIN questions q ON q.id = a.question_id
-                 WHERE a.attempt_id = :attempt_id AND o.is_correct = 1'
+                 FROM attempts attempt
+                 JOIN answers answer ON answer.attempt_id = attempt.id
+                 JOIN questions q ON q.id = answer.question_id AND q.exam_id = attempt.exam_id
+                 JOIN question_options option_row
+                   ON option_row.id = answer.selected_option_id
+                  AND option_row.question_id = q.id
+                  AND option_row.is_correct = 1
+                 WHERE attempt.id = :attempt_id'
             );
             $scoreQuery->execute(['attempt_id' => $attemptId]);
             $score = (int) $scoreQuery->fetchColumn();
