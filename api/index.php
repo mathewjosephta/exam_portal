@@ -365,7 +365,7 @@ switch ($action) {
         $pdo->beginTransaction();
         try {
             $attemptQuery = $pdo->prepare(
-                "SELECT a.status, a.started_at, e.duration_minutes
+                "SELECT a.status, a.started_at, a.exam_id, e.duration_minutes
                  FROM attempts a JOIN exams e ON e.id = a.exam_id
                  WHERE a.id = :id AND a.student_id = :student_id FOR UPDATE"
             );
@@ -392,11 +392,16 @@ switch ($action) {
                 api_response(['error' => 'That answer is not part of this exam question.'], 400);
             }
             $save = $pdo->prepare(
-                'INSERT INTO answers (attempt_id, question_id, selected_option_id)
-                 VALUES (:attempt_id, :question_id, :option_id)
+                'INSERT INTO answers (exam_id, attempt_id, question_id, selected_option_id)
+                 VALUES (:exam_id, :attempt_id, :question_id, :option_id)
                  ON DUPLICATE KEY UPDATE selected_option_id = VALUES(selected_option_id)'
             );
-            $save->execute(['attempt_id' => $attemptId, 'question_id' => $questionId, 'option_id' => $optionId]);
+            $save->execute([
+                'exam_id' => (int) $attempt['exam_id'],
+                'attempt_id' => $attemptId,
+                'question_id' => $questionId,
+                'option_id' => $optionId,
+            ]);
             $pdo->commit();
             api_response(['saved' => true]);
         } catch (Throwable $exception) {
