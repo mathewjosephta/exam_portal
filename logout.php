@@ -1,15 +1,28 @@
 <?php
 declare(strict_types=1);
 
-require __DIR__ . '/config/bootstrap.php';
+require_once __DIR__ . '/includes/functions.php';
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     header('Allow: POST');
-    exit('Sign out must be submitted as a form.');
+    exit('Method not allowed.');
 }
-verify_csrf($_POST['csrf_token'] ?? null);
+
+verify_csrf();
 $_SESSION = [];
-session_regenerate_id(true);
+
+if (ini_get('session.use_cookies')) {
+    $params = session_get_cookie_params();
+    setcookie(session_name(), '', [
+        'expires' => time() - 42000,
+        'path' => $params['path'],
+        'domain' => $params['domain'],
+        'secure' => $params['secure'],
+        'httponly' => $params['httponly'],
+        'samesite' => $params['samesite'] ?? 'Lax',
+    ]);
+}
+
 session_destroy();
-header('Location: index.html', true, 302);
-exit;
+redirect('login.php');

@@ -3,8 +3,9 @@
 .env.*
 !.env.example
 
-# Local database configuration
+# Local database and mail configuration
 /config/database.php
+/config/mail.php
 
 # Dependencies
 /vendor/
@@ -13,10 +14,13 @@
 # Logs
 *.log
 logs/
+error_log
 
 # Temporary files
 *.tmp
 *.temp
+*.swp
+*.swo
 
 # Operating system files
 .DS_Store
@@ -31,6 +35,43 @@ desktop.ini
 *.bak
 *.backup
 *.sql.gz
+*.dump
 
-# PHP debugging output
-error_log
+# PHP debugging and runtime files
+*.cache
+.phpunit.cache/
+.phpunit.result.cache
+
+# Local database files
+*.sqlite
+*.sqlite3
+*.db
+
+# Build and generated files
+/dist/
+/build/
+
+# Local configuration overrides
+config.local.php
+config.dev.php
+
+# Uploaded files and generated reports
+/uploads/*
+!/uploads/.gitkeep
+/reports/*
+!/reports/.gitkeep
+
+# Session files
+/sessions/
+
+# Coverage reports
+/coverage/
+
+# Windows and editor temporary files
+*.orig
+*.rej
+
+# Keep example configuration files tracked
+!.env.example
+!/config/database.example.php
+!/config/mail.example.php

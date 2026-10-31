@@ -1,43 +1,50 @@
-# ExamPortal
-
-A PHP and MySQL online examination portal with static HTML pages, a JavaScript client, and a PHP JSON API. It supports student registration, an administrator dashboard, timed multiple-choice exams, autosaved answers, automatic scoring, and answer review.
+# examspace Online Examination Portal
 
 ## Requirements
 
-- PHP 8.1 or newer with `pdo_mysql` and `mbstring` enabled
-- MySQL 8.0 or a compatible MariaDB release
-- A web server configured to serve this directory as the application root
+- XAMPP with Apache and MySQL
+- PHP 8.1 or later with `pdo_mysql`
+- Composer (needed for password-reset email support)
 
-## Setup
+## Local setup
 
-1. Create the database and tables by importing `database/online_exam.sql` into MySQL.
-2. Copy `config/database.example.php` to `config/database.php` and update the host, database name, username, and password, or set the `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` environment variables. `config/database.php` is intentionally excluded from version control. `.env.example` documents the variables; PHP does not load `.env` files automatically.
-3. Point your PHP web server at this directory. For a local PHP development server, run `php -S 127.0.0.1:8000` from the project root and open `http://127.0.0.1:8000`. The landing page and every student, admin, login, and exam screen are separate HTML files. PHP handles the application data and actions through `api/index.php`.
-4. Register a student account from the portal.
-5. Promote the first administrator from a trusted MySQL session:
+1. Put the project in `C:\xampp\htdocs\exam_portal` and start Apache and MySQL.
+2. For a fresh install, import [`database/online_exam.sql`](database/online_exam.sql) using phpMyAdmin. It creates the `online_exam` database and the required users, exams, questions, attempts, answers, and password reset tables.
+   For an existing installation that uses `question_options`, run [`database/migrate-existing-installation.sql`](database/migrate-existing-installation.sql) once instead. It retains the old columns and copies existing options and answers into the new format.
+3. Copy `config/database.example.php` to `config/database.php` and set your MySQL credentials.
+4. Run `composer install` from the project directory to install PHPMailer.
+5. To enable password reset emails, copy `config/mail.example.php` to `config/mail.php` and enter your SMTP settings.
+6. Visit `http://localhost/exam_portal/`.
 
-   ```sql
-   UPDATE users SET role = 'admin' WHERE email = 'your-admin-email@example.com';
-   ```
+The local database and mail configuration files are intentionally ignored by Git. Never commit real passwords or SMTP credentials.
+Exam schedules use the `APP_TIMEZONE` PHP/Apache environment variable; the default is `Asia/Kolkata`.
 
-   Sign out and sign back in to open the administrator dashboard.
+## First administrator
 
-The example database settings are for local development only. Configure production credentials outside source control, serve the site over HTTPS, and use a dedicated MySQL account with access only to this database.
+Public registration creates student accounts only. Create the first administrator directly in MySQL with a password hash:
 
-## HTML and PHP separation
+```sql
+INSERT INTO users (name, email, password_hash, role, status)
+VALUES ('Admin', 'admin@example.com', '<password-hash>', 'admin', 'active');
+```
 
-- `index.html`, `login.html`, `register.html`, `student/*.html`, and `admin/*.html` are the browser pages.
-- `assets/js/app.js` loads data and handles interactions using the JSON API.
-- `api/index.php?action=...` handles authentication, role checks, exam operations, and JSON responses.
-- `config/` contains the shared PHP bootstrap and database connection.
+Generate a hash with PHP:
 
-The API uses the existing PHP session and a CSRF token. Keep the HTML, JavaScript, and PHP API on the same origin so the browser can send the session cookie. The old `.php` page URLs redirect to their `.html` equivalents for compatibility.
+```php
+<?php
+echo password_hash('replace-with-a-strong-password', PASSWORD_DEFAULT);
+```
 
 ## Using the portal
 
-- Administrators create draft exams, add multiple-choice questions, then publish them. Published questions are locked to preserve existing attempts and scores. Each student can make one attempt per exam; availability dates control when an attempt can be started.
-- Students register, open an available exam, and choose one answer per question. Answers save automatically; the server enforces the timer and calculates the score at submission.
-- Students can review their submitted answers and results. Administrators can view all submitted scores.
-- Exam availability inputs and displayed timestamps use UTC.
+- Students can register, sign in, browse published exams, start or resume an attempt, and review submitted results.
+- Administrators can manage students, create exams, add questions, publish or close exams, and review submissions.
+- Exam answers are checked and scored on the server. An attempt can be submitted early or automatically when its time limit or exam window ends.
+- Students can request a password reset; reset tokens are stored as hashes and expire after 30 minutes.
 
-Only student accounts can be created through public registration. Create or promote administrator accounts through a trusted database session.
+## Troubleshooting
+
+- Confirm Apache and MySQL are running.
+- Check the credentials in `config/database.php` and verify the `online_exam` database exists.
+- Run `composer install` if password-reset email support reports a missing PHPMailer dependency.
+- Check the Apache/PHP error log for database or SMTP errors; application errors are not displayed with internal details.
