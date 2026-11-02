@@ -4,6 +4,9 @@ A web-based examination management system built with PHP and MySQL. examspace pr
 
 > **Project status:** Development project. Test the application locally before using it for real examinations or deploying it publicly.
 
+> **Repository integrity warning:** The current `main` branch contains unresolved Git merge-conflict markers in at least `database/online_exam.sql`, `student/take-exam.php`, and `student/submit-exam.php`. Resolve these conflicts and validate the resulting schema and PHP files before importing the database or running the application. The repository also contains a nested `exam_portal/` directory with a second copy of application files. Confirm which copy is authoritative before removing or reorganising either one.
+
+
 ## Features
 
 ### Student
