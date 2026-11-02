@@ -24,7 +24,7 @@ function e(mixed $value): string
 function app_url(string $path = ''): string
 {
     $script = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
-    $base = dirname($script);
+    $base = str_replace('\\', '/', dirname($script));
     $base = preg_replace('~/(admin|student|api)$~', '', $base) ?? $base;
     $base = $base === '.' || $base === '/' ? '' : rtrim($base, '/');
 
